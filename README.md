@@ -1,99 +1,60 @@
-# Human CPU Doom-like PoC
+# Human CPU Doom-like Qt PoC
 
-A tiny C++ proof of concept for the idea: **the human is the CPU, the program is only external memory, display, and optional validation**.
+A Qt/C++ proof of concept for the idea: **the human is the CPU, the application is only RAM/VRAM/IO**.
 
-This is not full Doom. It is a deliberately small Doom-like/raycasting toy where a person manually computes the next state and the wall distances for a low-resolution ASCII frame.
-
-```text
-map + registers + framebuffer live in the program
-human reads them
-human computes the next state
-human writes the results back
-program renders the frame from those manually entered values
-```
-
-The goal is to make the phrase “Doom running on a human brain” technically meaningful in a minimal, playable, inspectable form.
-
-## Concept
-
-In a normal game loop, the computer does this:
+This is not full Doom. It is a tiny Doom-like raycasting toy where the program stores the map, registers, distance buffer and framebuffer, but the human is expected to manually compute the next state and the ray distances.
 
 ```text
-input -> update game state -> raycast/render -> display frame
+external memory / map  -> human reads
+input/action register  -> human computes NEXT registers
+ray micro-instructions -> human computes DIST[0..15]
+framebuffer widget     -> program displays what the human wrote
 ```
 
-In this project, the loop is split:
-
-```text
-input -> human computes update -> human computes ray distances -> program displays frame
-```
-
-The program stores:
-
-- the map;
-- player registers;
-- the next-state registers;
-- a 16-column distance buffer;
-- an ASCII framebuffer.
-
-The human manually fills:
-
-- the next player position and direction;
-- the distance from the player to the first wall for each screen column.
-
-The program can optionally validate your calculation against a hidden built-in reference implementation, but validation is not required for the “human CPU” mode.
-
-## Screenshot
-
-Example ASCII frame:
-
-```text
-+----------------+
-|                |
-|                |
-|     ######     |
-|.....######.....|
-|.....######.....|
-|.....######.....|
-|.....######.....|
-|_____######_____|
-|________________|
-|________________|
-|________________|
-|________________|
-+----------------+
-```
+The app includes optional `Validate`, `Hint` and `Auto fill` buttons, but these are debugging/learning helpers. The pure mode is manual.
 
 ## Build
 
-Requires a C++17 compiler.
+Requires CMake and Qt Widgets. Qt 6 is preferred; Qt 5 also works.
 
 ### Linux / macOS
 
 ```bash
-g++ -std=c++17 -O2 human_cpu_doom_poc.cpp -o human_doom
-./human_doom
+mkdir build
+cd build
+cmake ..
+cmake --build . -j
+./human_cpu_doom_qt
 ```
 
-### Windows / MinGW
+### Windows / Visual Studio generator
 
 ```bat
-g++ -std=c++17 -O2 human_cpu_doom_poc.cpp -o human_doom.exe
-human_doom.exe
+mkdir build
+cd build
+cmake .. -G "Visual Studio 17 2022"
+cmake --build . --config Release
+Release\human_cpu_doom_qt.exe
 ```
 
-### Windows / MSVC Developer Command Prompt
+If CMake cannot find Qt, pass `CMAKE_PREFIX_PATH`, for example:
 
 ```bat
-cl /std:c++17 /O2 human_cpu_doom_poc.cpp /Fe:human_doom.exe
-human_doom.exe
+cmake .. -DCMAKE_PREFIX_PATH=C:\Qt\6.7.2\msvc2019_64
 ```
 
-## How to play manually
+## How to use
 
-When the program starts, it prints the map, registers, and current frame.
+1. Choose an action: `w`, `s`, `a`, `d`, or `.`.
+2. Manually compute the next player state.
+3. Enter `NEXT.X`, `NEXT.Y`, and `NEXT.DIR`.
+4. Read the ray micro-instruction table.
+5. Manually compute `DIST[0..15]` and type the values into the distance table.
+6. The framebuffer updates from your distance buffer.
+7. Press `Validate` only if you want to compare against the hidden reference.
+8. Press `Commit` to copy `NEXT` into the current player registers.
 
-The player direction is encoded as:
+## Direction encoding
 
 ```text
 0 = North
@@ -102,7 +63,7 @@ The player direction is encoded as:
 3 = West
 ```
 
-Actions are:
+## Action encoding
 
 ```text
 w = move forward
@@ -112,188 +73,62 @@ d = turn right
 . = do nothing
 ```
 
-A typical manual turn looks like this:
+## Memory layout
 
-```text
-action d
-next 2 2 1
-rays
-dist 2 2 2 2 2 1 1 1 1 1 1 3 3 3 3 3
-frame
-validate
-commit
-```
+The GUI deliberately exposes memory-like fields:
 
-Meaning:
-
-1. `action d` says the player wants to turn right.
-2. You manually compute the result and enter `next 2 2 1`.
-3. `rays` shows the ray directions that need to be evaluated.
-4. You manually compute 16 wall distances and enter them using `dist`.
-5. `frame` renders the ASCII framebuffer from your memory values.
-6. `validate` optionally checks your calculation.
-7. `commit` copies `NEXT` into the current player registers.
-
-## Commands
-
-```text
-map           show the external memory map
-regs          show player/action/NEXT/DIST registers
-action X      set action: w, s, a, d, or .
-next x y dir  manually write NEXT registers; dir is 0..3
-rays          show ray directions for each of the 16 columns
-dist 16 nums  manually write DIST[0..15]
-frame         render ASCII frame from current DIST[16]
-commit        copy NEXT into the current player state, then render
-validate      compare your manual values with the hidden reference
-hintnext      print the correct NEXT state
-hintdist      print the correct DIST[16]
-auto          auto-fill NEXT and DIST, then render and commit
-help          show command list
-quit          exit
-```
-
-## The map
-
-The current map is hardcoded in the source:
-
-```text
-############
-#..........#
-#.####.....#
-#.#..#..#..#
-#.#..#..#..#
-#....#.....#
-#..###..####
-#..........#
-############
-```
-
-`#` is a wall, `.` is empty space.
-
-The player is drawn as:
-
-```text
-^ = facing north
-> = facing east
-v = facing south
-< = facing west
-```
+- current player registers: `P.X`, `P.Y`, `P.DIR`;
+- input register: `ACTION`;
+- human-written next-state registers: `NEXT.X`, `NEXT.Y`, `NEXT.DIR`;
+- human-written display/raycast buffer: `DIST[0..15]`;
+- framebuffer display generated only from `DIST[0..15]`.
 
 ## Rendering model
 
-This is intentionally not a real Doom renderer.
-
-To keep the task human-computable, the screen has only 16 columns, and the ray direction for each column is simplified into one of three directions:
+To keep it human-computable, this version uses only 16 columns and three ray directions:
 
 ```text
-columns 0..4    = left diagonal ray
-columns 5..10   = center ray
-columns 11..15  = right diagonal ray
+columns 0..4    = left diagonal
+columns 5..10   = center
+columns 11..15  = right diagonal
 ```
 
-For each column, the human computes:
+For every column, compute:
 
 ```text
 DIST[column] = number of grid steps from NEXT position to the first wall
 ```
 
-The program then converts each distance into an ASCII wall slice:
+The framebuffer turns small distances into taller/darker wall slices and large distances into shorter/lighter ones.
 
-- small distance = tall/dark wall;
-- large distance = short/light wall.
+## What counts as human-CPU mode?
 
-## What counts as “human CPU mode”?
-
-The pure mode is:
+Pure mode:
 
 ```text
-action -> next -> rays -> dist -> frame -> commit
+choose ACTION
+manually write NEXT
+manually write DIST[0..15]
+observe framebuffer
+Commit
 ```
 
-The following commands are only helpers:
+Helper/debug mode:
 
 ```text
-validate
-hintnext
-hintdist
-auto
+Validate
+Hint NEXT
+Hint DIST
+Auto fill
 ```
 
-Using `auto` turns the program back into a normal tiny game engine, so it is useful for debugging, but not for the main concept.
+## Roadmap
 
-## Why this exists
-
-People often joke that Doom can run on anything. This project explores a strange edge case:
-
-> Can Doom run on a human brain if the brain does the computation and an external interface acts as memory/display?
-
-For a full Doom engine, this would be theoretically possible but practically absurd. The state, rendering, collision, map traversal, RNG, and enemy AI would require huge amounts of external memory and extremely slow manual computation.
-
-This PoC reduces the idea to the smallest useful form:
-
-- tiny grid map;
-- one player;
-- no enemies;
-- no textures;
-- no timing;
-- low-resolution ASCII framebuffer;
-- manually computed ray distances.
-
-It is still the same philosophical structure: the human performs the computation, while the machine only stores and displays the result.
-
-## Limitations
-
-- Not real Doom.
-- No WAD loading.
-- No BSP traversal.
-- No enemies, doors, items, weapons, or RNG.
-- No true perspective-correct renderer.
-- No continuous angles; only four cardinal directions.
-- Raycasting is simplified to three discrete ray directions.
-- The program contains an optional reference implementation for validation.
-
-## Possible next steps
-
-- Add a Qt GUI with editable memory tables.
-- Add a visible microinstruction list for each frame.
-- Add a VRAM-like framebuffer editor.
-- Add a step-by-step “manual ALU” mode.
-- Add enemies with manually updated state.
-- Add a small WAD-like level format.
-- Add a checksum so the user can prove a frame was computed manually.
-- Add “assisted human CPU” mode where the program only checks arithmetic but never computes the next frame.
-- Increase the renderer from 16 columns to 32 or 64 columns.
-- Add diagonal movement and more view angles.
-
-## Files
-
-```text
-human_cpu_doom_poc.cpp   single-file C++17 implementation
-README.md                this file
-```
-
-## License
-
-MIT License
-
-Copyright (c) 2026 Nicholas Shatokhin
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
+- editable maps;
+- more realistic fixed-point raycasting;
+- instruction-by-instruction mode;
+- save/load memory snapshots;
+- manual stack/register page;
+- optional enemies/sprites;
+- low-resolution texture memory;
+- speedrun mode for “frames manually computed per hour”.
